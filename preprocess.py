@@ -2,9 +2,8 @@
 from pykospacing import Spacing
 from PyKomoran import *
 from datasets import tqdm
+from soynlp.normalizer import repeat_normalize
 
-spacing = Spacing()
-print('running test:', spacing('아 몬소리야 그건 또'))
 
 
 class PreProcessKomoran:
@@ -12,17 +11,20 @@ class PreProcessKomoran:
         # print(__version__)
         self.komoran = Komoran("EXP")  # OR EXP
         self.datasets = [
-            './dataset/data/korean_aihub1_result.txt',
-            './dataset/data/korean_selectstar_result.txt',
+            './dataset/data/smilegate.txt'
+            # './dataset/data/korean_aihub1_result.txt',
+            # './dataset/data/korean_selectstar_result.txt',
         ]
 
-        self.result_path = 'dataset/result.txt'
+        self.result_path = 'dataset/result_smilegate.txt'
         # self.punct = "/-'?!.,#$%\'()*+-/:;<=>@[\\]^_`{|}~" + '""“”’' + '∞θ÷α•à−β∅³π‘₹´°£€\\×™√²—–&'
         # self.punct_mapping = {"‘": "'", "₹": "e", "´": "'", "°": "", "€": "e", "™": "tm", "√": " sqrt ", "×": "x", "²": "2",
         #                  "—": "-", "–": "-", "’": "'", "_": "-", "`": "'", '”': '"', '“': '"', "£": "e",
         #                  '∞': 'infinity', 'θ': 'theta', '÷': '/', 'α': 'alpha', '•': '.', 'à': 'a', '−': '-',
         #                  'β': 'beta', '∅': '', '³': '3', 'π': 'pi', }
 
+        self.spacing = Spacing()
+        print('pykospacing test:', self.spacing('아 몬소리야 그건 또'))
     # def clean(self, text, punct, mapping):
     #     for p in mapping:
     #         text = text.replace(p, mapping[p])
@@ -53,8 +55,8 @@ class PreProcessKomoran:
         text = text.replace('/', '')
 
         # print(text)
-        text = spacing(text)
-        # text = repeat_normalize(text, num_repeats=2)
+        text = self.spacing(text)
+        text = repeat_normalize(text, num_repeats=2)
 
 
         # 즵 즺 즫 즥 즷 즴 즨 즹 즬 즿 즼 즽 즻 즻 즾
@@ -80,6 +82,36 @@ class PreProcessKomoran:
 
         return text
 
+    def filter_text(self, text):
+        def filter_sw(text):
+            split = text.split("/")
+
+            if len(split) == 1:
+                return '#' not in text
+
+            # return True
+            if len(split) > 2:
+                word = '/'.join(split[:-1])
+                wtype = split[-1]
+            else:
+                word, wtype = split
+
+            if wtype == 'NNP' or wtype == 'NNG':
+                return True
+
+            if wtype == 'VV' or wtype == 'VA':
+                return True
+
+            return False
+
+        text = self.clean_text(text)
+
+        res = self.komoran.get_plain_text(text).split(' ')
+
+        res = list(filter(filter_sw, res))  # 필터링
+        res = list(map(lambda x: x.split('/')[0], res))  # 대한민국/NNP 같은 단어가 있으면 슬래시 뒤 문자 떼버림
+
+        return res
 
     def get_tokens(self):
         all_texts = []
@@ -91,43 +123,17 @@ class PreProcessKomoran:
                 all_texts.append(line.strip())
 
         for text in tqdm(all_texts):
-            def filter_sw(text):
-                split = text.split("/")
-
-                if len(split) == 1:
-                    return '#' not in text
-
-                if len(split) > 2:
-                    word = '/'.join(split[:-1])
-                    wtype = split[-1]
-                else:
-                    word, wtype = split
-
-
-                if wtype == 'NNP' or wtype == 'NNG':
-                    return True
-
-                if wtype == 'VV' or wtype == 'VA':
-                    return True
-
-                return False
-
+            orig = text
             # print(text)
+            texts = text.split("|")
+            if len(texts) >= 3:
+                first = ' '.join(texts[:-1])
+                text = f'{first}|{texts[-1]}'
+
             text, label = text.split("|")
-            text = self.clean_text(text)
+            res = self.filter_text(text)
 
-            if len(text) < 5:
-                print("len", len(text), text)
-                continue
-
-            res = self.komoran.get_plain_text(text).split(' ')
-
-            res = list(filter(filter_sw, res))  # 필터링
-            res = list(map(lambda x: x.split('/')[0], res))  # 대한민국/NNP 같은 단어가 있으면 슬래시 뒤 문자 떼버림
-            # print(text, res, len(res))
-
-            if len(res) < 3:
-                print("list len", len(res), res)
+            if res is None:
                 continue
 
             results.append((res, label))
