@@ -23,3 +23,6 @@
 
 [KR-korcen/verification: 모든 한국어 비속어/욕설 판별기에 대한 성능 테스트입니다.](https://github.com/KR-korcen/verification?tab=readme-ov-file)
 
+[songys/AwesomeKorean_Data: 한국어 데이터 세트 링크](https://github.com/songys/AwesomeKorean_Data?tab=readme-ov-file)
+
+[Beomi/KcBERT: 🤗 Pretrained BERT model & WordPiece tokenizer trained on Korean Comments 한국어 댓글로 프리트레이닝한 BERT 모델과 데이터셋](https://github.com/Beomi/KcBERT?tab=readme-ov-file)
