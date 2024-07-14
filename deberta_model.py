@@ -2,15 +2,17 @@ import os
 
 import torch
 from datasets import tqdm
+from kobert_tokenizer import KoBERTTokenizer
 from matplotlib import pyplot as plt
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchsummary import summary
-from transformers import AutoTokenizer, DebertaV2ForSequenceClassification, DebertaV2Config
+from transformers import AutoTokenizer, DebertaV2ForSequenceClassification, DebertaV2Config, pipeline, \
+    DebertaForSequenceClassification
 
 from yamlload import Config
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda:1" if torch.cuda.is_available() else "cpu"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
@@ -18,10 +20,16 @@ def collate_fn(batch):
     data = []
     labels = []
 
+    # max_len = 0
+
     for text, label in batch:
         data.append(text)
         labels.append([1.0 if label == 0 else 0.0, 1.0 if label == 1 else 0.0])
+        # max_len = max(max_len, len(text))
 
+    # data_pad = []
+    # for text in data:
+    #     data_pad.append(text + " " * (max_len - len(text)))
     # print(len(data), len(labels))
     # print(labels)
 
@@ -74,8 +82,8 @@ class DebertaClassificationModel:
 
             self.testloader = None
 
-        # model.config
-        self.tokenizer = AutoTokenizer.from_pretrained("skt/kobert-base-v1")
+        # model.config skt/kobert-base-v1
+        self.tokenizer = KoBERTTokenizer.from_pretrained("skt/kobert-base-v1")
         model = DebertaV2ForSequenceClassification.from_pretrained("microsoft/deberta-v3-large")
         # # model.config.max_position_embeddings = 1024
         # # del model.config.id2label[1]
@@ -83,9 +91,13 @@ class DebertaClassificationModel:
         # # self.model = DebertaForSequenceClassification(model.config).to(device)
         # # num_labels = len(model.config.id2label)
         #
-        model.config.num_labels = 2
+        # model.config.num_labels = 2
+        # model.config.hidden_dropout_prob = 0.01
+        # model.config.attention_probs_dropout_prob = 0.01
         # model.config.vocab_size = 100000
         # model.config.hidden_size = 1000
+
+        deberta_config = model.config
 
         # deberta_config = DebertaV2Config(
         #     vocab_size=128000,  # 한국어 대규모 데이터셋을 위한 적절한 vocab size
@@ -100,8 +112,23 @@ class DebertaClassificationModel:
         #     attention_probs_dropout_prob=0.1,
         # )
 
+        # deberta_config = DebertaV2Config(
+        #     type_vocab_size=1,
+        #     vocab_size=128100,
+        #     hidden_size=1536,
+        #     num_labels=2
+        # )
+
+        # deberta_config.pad_token_id = 1
+        # deberta_config.position_biased_input = False
+
         # model.config.max_position_embeddings = 768
-        self.model = DebertaV2ForSequenceClassification(model.config).to(device)
+        self.model = DebertaV2ForSequenceClassification(deberta_config)
+        # if device == "cuda:0":
+        #     print(torch.cuda.device_count())
+        #     self.model = nn.DataParallel(self.model)
+
+        self.model.to(device)
         # summary(self.model, (4, 50))
         # self.model.apply(self.weights_init)
 
@@ -110,8 +137,11 @@ class DebertaClassificationModel:
 
 
         # self.optimizer = create_xadam(self.model, config.train.epoch)
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
+        # self.optimizer = torch.optim.Adam(self.model.parameters(), lr=config.train.learning_rate)
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.train.learning_rate)
         # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+
+        # self.pipe = pipeline(tokenizer=self.tokenizer, model=self.model, device=device)
 
         self.train_accuracy = []
         self.validation_accuracy = []
@@ -136,24 +166,92 @@ class DebertaClassificationModel:
                 torch.nn.init.zeros_(m.bias)
 
     def train_one(self, inputs, labels):
+        self.optimizer.zero_grad()
+
+        # print(inputs)
         inputs = self.tokenizer(inputs, return_tensors="pt", padding=True).to(device)
+
+        # [ 배치사이즈가 1일때(kobert) ]
+        # {'input_ids': tensor([[517,   0, 517,   0, 517, 493,   0, 490,   0, 517, 490,   0, 517,   0,
+        #          517, 491, 494,   0, 517,   0, 517,   0, 517, 493,   0, 490,   0, 517,
+        #            0, 517, 493,   0, 493,   0, 517,   0, 517, 493,   0, 517,   0, 490,
+        #            0,   0,   0]]), 'token_type_ids': tensor([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        #          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]]), 'attention_mask': tensor([[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        #          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]])}
+
+        # [ 배치사이즈가 4일때(kobert) ]
+        # ['개소리 공정 말 정권 들 바뀌', '판결 이번 되 이상', '반미 어떻 하 사건 세월호 이용 대통령 되 나라', '암 주연 끌 상관없']
+        # {'input_ids': tensor([[  1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1, 517,
+        #          490,   0, 494, 517, 490,   0, 517,   0, 517,   0, 490,   0, 517,   0,
+        #          517,   0,   0,   0],
+        #         [  1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,
+        #            1,   1, 517,   0, 490,   0, 517, 491, 494,   0, 517,   0, 517, 491,
+        #          494,   0,   0,   0],
+        #         [517,   0, 494, 517, 491,   0, 517, 493,   0, 517,   0, 490,   0, 517,
+        #            0, 491,   0, 493,   0, 517, 491, 494, 491,   0, 517,   0, 517,   0,
+        #          517,   0,   0,   0],
+        #         [  1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,
+        #            1, 517, 491,   0, 517,   0, 491,   0, 517,   0, 517,   0, 490,   0,
+        #          491,   0,   0,   0]]), 'token_type_ids': tensor([[3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        #          0, 0, 0, 0, 0, 0, 0, 2],
+        #         [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0,
+        #          0, 0, 0, 0, 0, 0, 0, 2],
+        #         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        #          0, 0, 0, 0, 0, 0, 0, 2],
+        #         [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        #          0, 0, 0, 0, 0, 0, 0, 2]]), 'attention_mask': tensor([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        #          1, 1, 1, 1, 1, 1, 1, 1],
+        #         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,
+        #          1, 1, 1, 1, 1, 1, 1, 1],
+        #         [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        #          1, 1, 1, 1, 1, 1, 1, 1],
+        #         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        #          1, 1, 1, 1, 1, 1, 1, 1]])}
+
+        # 매핑 정보: kobert -> deberta
+        # 0 -> 2 (시퀀스 끝, 3)
+        # 0 ->
+        # 배치 사이즈가 4일때 (microsoft deberta tokenizer)
+        # {'input_ids': tensor([[     1,  96442, 106446,  97769, 122785,  68368,      2,      0,      0,
+        #               0,      0,      0,      0,      0,      0,      0,      0,      0,
+        #               0,      0],
+        #         [     1,    507, 122863, 123001,  60388,  37060,  96152,  39027,  80163,
+        #             507, 123272,  92388,    507,  67435, 114304,    507, 123947,  51223,
+        #           15048,      2],
+        #         [     1,    507, 123212,    507, 123212,    507, 122626,      2,      0,
+        #               0,      0,      0,      0,      0,      0,      0,      0,      0,
+        #               0,      0],
+        #         [     1,    507, 123154,  42812,  51139,  64010,    507, 123460,  98088,
+        #          122854,    507,      3, 113152,  73444,  98422,  52793, 105691,    507,
+        #               3,      2]]), 'token_type_ids': tensor([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]), 'attention_mask': tensor([[1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #         [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        #         [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #         [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]])}
+
+        # print(inputs)
         # print(inputs['input_ids'].shape)
         if torch.isnan(inputs['input_ids']).any():
             raise Exception("input value has nan")
 
+        # cudas = ["cuda:0", "cuda:1"]
+
         labels = labels.to(device)
 
-        self.optimizer.zero_grad()
-        output = self.model(**inputs)
+        output = self.model(input_ids=inputs['input_ids'], attention_mask=inputs['attention_mask'])
         logits = output.logits
 
-        # if torch.isnan(loss).any():
-        #     raise Exception("loss has nan")
 
-        logits_with_softmax = self.softmax(logits)
+        # logits_with_softmax = self.softmax(logits)
 
-        loss = self.criterion(logits_with_softmax, labels)
-        # print(logits_with_softmax, labels, loss.item())
+        loss = self.criterion(logits, labels)
+
+        # print(logits, logits_with_softmax, labels, loss.item())
+        if torch.isnan(loss).any():
+            raise Exception("loss has nan")
+
         loss.backward()
 
         predicted_class_id = output.logits.argmax(dim=1)
@@ -239,7 +337,7 @@ class DebertaClassificationModel:
             self.validation_accuracy.append(self.validation())
 
             # torch.save(self.model, f'deberta_{i}.pt')
-            self.save_weights(epoch, self.train_accuracy[-1], self.validation_accuracy[-1])
+            self.save_weights(i)
 
         self.show_plot(self.train_accuracy, self.validation_accuracy)
 
@@ -247,20 +345,25 @@ class DebertaClassificationModel:
         self.train_accuracy.clear()
         self.validation_accuracy.clear()
 
-        checkpoint = torch.load(f'chkpt/deberta_{epoch}.pth')
+        checkpoint = torch.load(f'chkpt/deberta_{epoch}.pth', map_location=torch.device(device))
 
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.train_accuracy.extend(checkpoint['train_accuracy'])
-        self.validation_accuracy.extend(checkpoint['validation_accuracy'])
 
-    def save_weights(self, epoch, train_acc, validation_acc):
+        if type(checkpoint['train_accuracy']) == float:
+            self.train_accuracy.append(checkpoint['train_accuracy'])
+            self.validation_accuracy.append(checkpoint['validation_accuracy'])
+        else:
+            self.train_accuracy.extend(checkpoint['train_accuracy'])
+            self.validation_accuracy.extend(checkpoint['validation_accuracy'])
+
+    def save_weights(self, epoch):
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'train_accuracy': train_acc,
-            'validation_accuracy': validation_acc
+            'train_accuracy': self.train_accuracy,
+            'validation_accuracy': self.validation_accuracy
         }
 
         os.makedirs('chkpt', exist_ok=True)
