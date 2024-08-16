@@ -5,10 +5,10 @@ from datasets import tqdm
 
 class DataSpliter:
     def __init__(self):
-        self.route = "dataset/result.txt"
-        self.train = "dataset/train.txt"
+        self.route = "dataset/result_komoran.txt"
+        self.train = "dataset/train_komoran.txt"
         self.train_small = "dataset/train_small.txt"
-        self.validation = "dataset/validation.txt"
+        self.validation = "dataset/validation_komoran.txt"
         self.validation_small = "dataset/validation_small.txt"
 
     def distinct(self, lst):
