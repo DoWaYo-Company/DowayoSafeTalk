@@ -4,8 +4,14 @@ data:
   test: 'dataset/test.txt'
 
 train:
-  batch_size: 4
+  batch_size: 16
   start_epoch: 1
-  epoch: 30
+  epoch: 3
   num_workers: 4
-  learning_rate: 0.001
+  learning_rate: 0.00000015
+  gpu: 'cuda'
+  ai_name: 'example'
+  shuffle: True
+
+parallel:
+  gpu_devices: 0 1
