@@ -270,7 +270,7 @@ class DebertaClassificationModel:
 
         counts = 0
         corrects = 0
-        for text, label in tqdm(self.validationloader, ncols=100):
+        for text, label in tqdm(self.validationloader, ncols=75):
             correct, count = self.vali_one(text, label)
 
             corrects += correct
