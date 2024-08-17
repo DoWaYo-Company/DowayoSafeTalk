@@ -22,18 +22,9 @@ def collate_fn(batch):
     data = []
     labels = []
 
-    # max_len = 0
-
     for text, label in batch:
         data.append(text)
         labels.append(label)
-        # max_len = max(max_len, len(text))
-
-    # data_pad = []
-    # for text in data:
-    #     data_pad.append(text + " " * (max_len - len(text)))
-    # print(len(data), len(labels))
-    # print(labels)
 
     return data, torch.tensor(labels)
 
@@ -86,59 +77,16 @@ class DebertaClassificationModel:
 
         # model.config skt/kobert-base-v1
         self.tokenizer = KoBERTTokenizer.from_pretrained("skt/kobert-base-v1")
+
         # model = DebertaV2ForSequenceClassification.from_pretrained("microsoft/deberta-v3-large")
         # model = RobertaForSequenceClassification.from_pretrained("FacebookAI/roberta-base")
         model = RobertaForSequenceClassification.from_pretrained("FacebookAI/roberta-large")
-        # # model.config.max_position_embeddings = 1024
-        # # del model.config.id2label[1]
-        #
-        # # self.model = DebertaForSequenceClassification(model.config).to(self.device)
-        # # num_labels = len(model.config.id2label)
-        #
-        # model.config.num_labels = 2
-        # model.config.hidden_dropout_prob = 0.01
-        # model.config.attention_probs_dropout_prob = 0.01
-        # model.config.vocab_size = 100000
-        # model.config.hidden_size = 1000
 
         deberta_config = model.config
-
-        # deberta_config = DebertaV2Config(
-        #     vocab_size=128000,  # 한국어 대규모 데이터셋을 위한 적절한 vocab size
-        #     hidden_size=1024,  # 라지 모델의 히든 크기
-        #     num_hidden_layers=24,  # 레이어 개수
-        #     num_attention_heads=16,  # 어텐션 헤드 개수
-        #     intermediate_size=4096,  # 피드포워드 레이어 크기
-        #     max_position_embeddings=512,  # 최대 시퀀스 길이
-        #     type_vocab_size=2,
-        #     layer_norm_eps=1e-7,
-        #     hidden_dropout_prob=0.1,
-        #     attention_probs_dropout_prob=0.1,
-        # )
-
-        # deberta_config = DebertaV2Config(
-        #     type_vocab_size=1,
-        #     vocab_size=128100,
-        #     hidden_size=1536,
-        #     num_labels=2
-        # )
-
         deberta_config.pad_token_id = 1
-        # deberta_config.position_biased_input = False
-
-        # model.config.max_position_embeddings = 768
-
-        # global args
-
-        # args.gpu = 0
-        # args.world_size = 1
-
-        # args.gpu = args.local_rank
 
         model_with_config = RobertaForSequenceClassification(deberta_config)
 
-
-        # self.optimizer = create_xadam(self.model, config.train.epoch)
         # self.optimizer = torch.optim.Adam(self.model.parameters(), lr=config.train.learning_rate)
         self.optimizer = torch.optim.AdamW(model_with_config.parameters(), lr=config.train.learning_rate)
         # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -157,7 +105,6 @@ class DebertaClassificationModel:
             torch.cuda.set_device(gpu)
             torch.distributed.init_process_group(backend='nccl',
                                                  init_method='env://')
-            # world_size = torch.distributed.get_world_size()
 
             model_with_config.cuda(gpu)
             self.model = DDP(model_with_config,
@@ -168,13 +115,8 @@ class DebertaClassificationModel:
             self.model = model_with_config
             self.model.to(config.train.gpu)
 
-
-        # self.multi_gpu = config.train.multi_gpu
-
         self.device = config.train.gpu if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
-        # summary(self.model, (4, 50))
-        # self.model.apply(self.weights_init)
 
         # self.criterion = nn.CrossEntropyLoss()
         self.criterion = BalancedFocalLoss(alpha=torch.tensor([0.35, 0.65]).to(self.device), gamma=2.0, weight=torch.tensor([1.0, 1.5]).to(self.device))
@@ -225,6 +167,7 @@ class DebertaClassificationModel:
 
         # if torch.isnan(loss).any():
         #     raise Exception("loss has nan")
+
         # with amp.scale_loss(loss, self.optimizer) as scaled_loss:
         #     scaled_loss.backward()
         loss.backward()
@@ -294,7 +237,6 @@ class DebertaClassificationModel:
             self.train_accuracy.append(self.train())
             self.validation_accuracy.append(self.validation())
 
-            # torch.save(self.model, f'deberta_{i}.pt')
             self.save_weights(i)
 
         self.show_plot(self.train_accuracy, self.validation_accuracy)
@@ -372,7 +314,6 @@ class BalancedFocalLoss(nn.Module):
 
     def forward(self, inputs, targets):
         # BCE 손실 계산
-        # bce_loss = F.binary_cross_entropy_with_logits(inputs, targets, weight=self.weight, reduction='none')
         ce_loss = self.ce(inputs, targets)
 
         # # 확률 예측 값 계산
@@ -386,15 +327,10 @@ class BalancedFocalLoss(nn.Module):
         pt = torch.exp(-ce_loss)
 
         if self.alpha is not None:
-            # ce_loss *= self.alpha.gather(0, targets[:, 1])
             ce_loss *= self.alpha.gather(0, targets)
 
         # Focal Loss 계산
         loss = (1 - pt) ** self.gamma * ce_loss
-
-        # BCE와 Focal Loss 결합
-        # loss = focal_weight * bce_loss
-        # loss = bce_loss
 
         if self.reduction == 'mean':
             return loss.mean()
@@ -404,18 +340,13 @@ class BalancedFocalLoss(nn.Module):
             return loss
 
 
-# 학습 안시키면 정확도 51%
 if __name__ == "__main__":
     c = Config('config/config.yml')
 
     parser = argparse.ArgumentParser()
-    # FOR DISTRIBUTED:  Parse for the local_rank argument, which will be supplied
-    # automatically by torch.distributed.launch.
     parser.add_argument("--local-rank", default=os.getenv('LOCAL_RANK', 0), type=int)
     args = parser.parse_args()
 
-
-    # args.local_rank = os.environ['LOCAL_RANK']
     args.distributed = False
     if 'WORLD_SIZE' in os.environ:
         args.distributed = int(os.environ['WORLD_SIZE']) > 1
