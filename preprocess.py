@@ -25,7 +25,7 @@ class PreProcessKomoran:
             './dataset/data/korean_dialect.txt',
         ]
 
-        self.result_path = 'dataset/result.txt'
+        self.result_path = 'dataset/result_komoran.txt'
         # self.punct = "/-'?!.,#$%\'()*+-/:;<=>@[\\]^_`{|}~" + '""“”’' + '∞θ÷α•à−β∅³π‘₹´°£€\\×™√²—–&'
         # self.punct_mapping = {"‘": "'", "₹": "e", "´": "'", "°": "", "€": "e", "™": "tm", "√": " sqrt ", "×": "x", "²": "2",
         #                  "—": "-", "–": "-", "’": "'", "_": "-", "`": "'", '”': '"', '“': '"', "£": "e",
